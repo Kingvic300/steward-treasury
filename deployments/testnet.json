@@ -1,0 +1,46 @@
+{
+  "network": "testnet",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "horizonUrl": "https://horizon-testnet.stellar.org",
+  "contractId": "CCVCO6UWFYZS34QGIIIEMA6E5YKAMFNMBPMM23MVA5Q6Q6YMNQYTJBFJ",
+  "wasmHash": "48b59e4a924564461aa09d5293080b48b6b25df144201ef01cb3362d9b6cf836",
+  "tokens": {
+    "native": {
+      "id": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+      "symbol": "XLM",
+      "name": "Stellar Lumens",
+      "decimals": 7
+    },
+    "demo": {
+      "id": "CARYBMIJ7BYAW6Y5WUX7AIUWPYYGX5M4RPHQJKBAMLXI7EBQCZU5GEIY",
+      "symbol": "STWD",
+      "name": "Steward Demo Token",
+      "decimals": 7,
+      "issuer": "GDKZJUB5KGJBAXLORYXMG2KIVQBD7NF2FZU3IFDGXH2MSBMZ4LPN24C4"
+    }
+  },
+  "config": {
+    "threshold": 2,
+    "timelock_delay": 300,
+    "voting_period": 604800,
+    "execution_window": 259200
+  },
+  "members": {
+    "approvers": [
+      "GAGREC7N5JXTHKTMESHKJIKBN57MUS6FFBNOW6SSLD3UX4OI7FX6MGM6",
+      "GATI7BFBM6PRG6PTS6OZIQH6N45Y5ENXZ2TQGX5LWOY4V3GCA6EIJL5U",
+      "GARHTODBQ3DPEIAPUPSPB2ZOFRZHIR4JA5NWNDOIJNDMMEGPXAF37YUE"
+    ],
+    "proposers": [
+      "GAGREC7N5JXTHKTMESHKJIKBN57MUS6FFBNOW6SSLD3UX4OI7FX6MGM6",
+      "GATI7BFBM6PRG6PTS6OZIQH6N45Y5ENXZ2TQGX5LWOY4V3GCA6EIJL5U",
+      "GARHTODBQ3DPEIAPUPSPB2ZOFRZHIR4JA5NWNDOIJNDMMEGPXAF37YUE"
+    ],
+    "executors": [
+      "GCLNNETFGRNKLQJVW2TRBR2Y4NIL3NVI5BXQK6TFH2SICSC6Y7TVWSPR"
+    ],
+    "ops": "GAXEQ5IW5X72QBNS55HQYAF4XTXBCVTEJ3J7UH5IMS2HFRZUPCJG44VD"
+  },
+  "deployedAt": "2026-11-13T19:02:15Z"
+}

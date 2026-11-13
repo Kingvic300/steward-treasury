@@ -1,0 +1,18 @@
+{
+  "name": "steward",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Programmable multisig treasury for Stellar",
+  "license": "MIT",
+  "packageManager": "pnpm@12.18.0",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build:client": "pnpm --filter @steward/treasury-client build",
+    "dev": "pnpm build:client && pnpm --filter @steward/web dev",
+    "build": "pnpm build:client && pnpm --filter @steward/web build",
+    "lint": "pnpm --filter @steward/web lint",
+    "typecheck": "pnpm build:client && pnpm --filter @steward/web typecheck",
+    "test": "pnpm build:client && pnpm --filter @steward/web test",
+    "test:e2e": "pnpm build:client && pnpm --filter @steward/web test:e2e"
+  }
+}

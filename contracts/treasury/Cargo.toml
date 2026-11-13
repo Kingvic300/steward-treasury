@@ -1,0 +1,20 @@
+[package]
+name = "steward-treasury"
+description = "Steward: programmable multisig treasury for Stellar (Soroban)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+soroban-sdk = { workspace = true }
+stellar-access = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+proptest = { workspace = true }

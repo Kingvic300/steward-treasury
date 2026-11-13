@@ -1,0 +1,149 @@
+@import "tailwindcss";
+
+/*
+ * Steward: white surfaces, ink text, hairlines, and one brass accent.
+ * State colours appear only on status badges and meters.
+ */
+:root {
+  --background: #ffffff;
+  --surface: #ffffff;
+  --surface-raised: #f6f5f1;
+  --border: #e5e3db;
+  --border-strong: #cdcabd;
+  --foreground: #10162a;
+  --muted: #555c72;
+  --accent: #8a6410;
+  --accent-strong: #6b4d06;
+  --accent-soft: #f6eed8;
+  --on-accent: #ffffff;
+  --ring: #8a6410;
+
+  --ok: #17694a;
+  --ok-soft: #e1f3ea;
+  --wait: #1d5a96;
+  --wait-soft: #e3eefa;
+  --warn: #8a5300;
+  --warn-soft: #f9edd5;
+  --danger: #a8281f;
+  --danger-soft: #fbe6e3;
+  --idle: #555c72;
+  --idle-soft: #efede7;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-ring: var(--ring);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-wait: var(--wait);
+  --color-wait-soft: var(--wait-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-idle: var(--idle);
+  --color-idle-soft: var(--idle-soft);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+
+  /* A modular scale (ratio 1.2) from a 15px base. */
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.35rem;
+  --text-2xl: 1.62rem;
+  --text-3xl: 1.944rem;
+  --text-4xl: 2.6rem;
+  --text-5xl: 3.4rem;
+  --text-6xl: 4.4rem;
+  --text-7xl: 5.6rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    min-width: 320px;
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+  button:not(:disabled),
+  [role="tab"],
+  summary {
+    cursor: pointer;
+  }
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Full-bleed: content runs edge to edge with a fluid gutter. */
+@utility container-page {
+  width: 100%;
+  padding-inline: clamp(1rem, 4vw, 4.5rem);
+}
+
+.display {
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 0.96;
+}
+
+/*
+ * Steward is a still interface: nothing moves on its own and state changes are
+ * instant. The only motion left is the spinner that shows work in progress.
+ */
+*,
+*::before,
+*::after {
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+*:not(.animate-spin),
+*::before,
+*::after {
+  animation: none !important;
+}

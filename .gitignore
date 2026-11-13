@@ -1,0 +1,37 @@
+# Rust
+target/
+contracts/**/test_snapshots/
+contracts/**/proptest-regressions/
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.turbo/
+.vercel/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Secrets: never commit keys
+.stellar/
+.env
+.env.*
+!.env.example
+*.pem
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.log
+
+# Local scratch scripts
+*.tmp.mjs
