@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowRight, Plus, Wallet } from "lucide-react";
 import { AddressPill } from "@/components/address";
+import { Onboarding } from "@/components/onboarding";
 import { Seals } from "@/components/seals";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
 import { Button } from "@/components/ui/button";
@@ -121,6 +122,8 @@ export default function TreasuriesPage() {
             </Button>
           </div>
         </div>
+
+        {address && saved.length === 0 && <Onboarding address={address} />}
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
           <ul className="grid gap-4 xl:grid-cols-2" data-testid="treasury-list">

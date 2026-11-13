@@ -14,14 +14,14 @@ export function LandingCta() {
     <div className="flex flex-wrap gap-3">
       {address ? (
         <Button asChild size="lg">
-          <Link href="/create">Create a treasury</Link>
+          <Link href="/treasuries">Open the app</Link>
         </Button>
       ) : (
         <Button
           size="lg"
           loading={connecting}
           onClick={async () => {
-            if (await connect()) router.push("/create");
+            if (await connect()) router.push("/treasuries");
           }}
         >
           Connect wallet
