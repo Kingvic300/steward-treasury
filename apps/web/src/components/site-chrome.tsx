@@ -29,7 +29,10 @@ export function SiteHeader() {
             ))}
           </nav>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <Link href="/treasuries" className="hidden h-10 items-center rounded-md px-3 text-sm font-medium text-muted hover:bg-raised hover:text-foreground sm:inline-flex">
+            Open app
+          </Link>
           <WalletButton />
         </div>
       </div>
