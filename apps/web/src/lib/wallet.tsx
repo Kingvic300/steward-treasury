@@ -8,7 +8,8 @@
  * the kit: it signs with a secret key read from localStorage. Playwright uses
  * it to drive real testnet transactions. It must never be enabled in production.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { WalletPicker, type PickerStatus, type WalletOption } from "@/components/wallet-picker";
 import { network, testWalletEnabled } from "./network";
 import type { Signer } from "./treasury";
 
@@ -31,8 +32,35 @@ const Context = createContext<WalletContext | null>(null);
 
 let kitReady: Promise<typeof import("@creit.tech/stellar-wallets-kit/sdk")> | null = null;
 
+interface LegacyXBullSdk {
+  getAddress?: unknown;
+  signTransaction?: unknown;
+  connect?: (permissions: { canRequestPublicKey: boolean; canRequestSign: boolean }) => Promise<unknown>;
+  getPublicKey?: () => Promise<string>;
+  signXDR?: (xdr: string, options?: { network?: string; publicKey?: string }) => Promise<string>;
+}
+
+/**
+ * Older xBull extensions inject `window.xBullSDK` with connect/getPublicKey/signXDR,
+ * while the kit's xBull bridge expects getAddress/signTransaction. Add the newer
+ * methods on top of the older ones so both extension versions work.
+ */
+function shimLegacyXBull() {
+  const sdk = (window as unknown as { xBullSDK?: LegacyXBullSdk }).xBullSDK;
+  if (!sdk || typeof sdk.getAddress === "function") return;
+  if (typeof sdk.getPublicKey !== "function" || typeof sdk.signXDR !== "function") return;
+  sdk.getAddress = async () => {
+    await sdk.connect?.({ canRequestPublicKey: true, canRequestSign: true });
+    return { address: await sdk.getPublicKey!() };
+  };
+  sdk.signTransaction = async ({ xdr, opts }: { xdr: string; opts?: { networkPassphrase?: string; address?: string } }) => ({
+    signedTxXdr: await sdk.signXDR!(xdr, { network: opts?.networkPassphrase, publicKey: opts?.address }),
+  });
+}
+
 function loadKit() {
   kitReady ??= (async () => {
+    shimLegacyXBull();
     const [sdk, types, freighter, xbull, albedo, lobstr, hana] = await Promise.all([
       import("@creit.tech/stellar-wallets-kit/sdk"),
       import("@creit.tech/stellar-wallets-kit/types"),
@@ -76,6 +104,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
   const [connecting, setConnecting] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [wallets, setWallets] = useState<WalletOption[]>([]);
+  const [pickerStatus, setPickerStatus] = useState<PickerStatus>({ name: "loading" });
+  const resolvePick = useRef<((address: string | null) => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -99,25 +131,61 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const finishPick = useCallback((result: string | null) => {
+    resolvePick.current?.(result);
+    resolvePick.current = null;
+    setPickerOpen(false);
+  }, []);
+
   const connect = useCallback(async () => {
-    setConnecting(true);
-    try {
-      let next: string;
-      if (testWalletEnabled && window.localStorage.getItem(TEST_SECRET_KEY)) {
-        next = (await testWallet()).address;
-      } else {
-        const kit = await loadKit();
-        next = (await kit.StellarWalletsKit.authModal()).address;
-        window.localStorage.setItem(ADDRESS_KEY, next);
-      }
+    if (testWalletEnabled && window.localStorage.getItem(TEST_SECRET_KEY)) {
+      const next = (await testWallet()).address;
       setAddress(next);
       return next;
-    } catch {
-      return null; // The person closed the wallet picker.
-    } finally {
-      setConnecting(false);
     }
+    setPickerStatus({ name: "loading" });
+    setPickerOpen(true);
+    const picked = new Promise<string | null>((resolve) => {
+      resolvePick.current?.(null);
+      resolvePick.current = resolve;
+    });
+    try {
+      const kit = await loadKit();
+      const found = await kit.StellarWalletsKit.refreshSupportedWallets();
+      setWallets(found.map(({ id, name, icon, url, isAvailable }) => ({ id, name, icon, url, isAvailable })));
+      setPickerStatus({ name: "idle" });
+    } catch {
+      setWallets([]);
+      setPickerStatus({ name: "idle" });
+    }
+    const next = await picked;
+    setConnecting(false);
+    return next;
   }, []);
+
+  const pick = useCallback(
+    async (wallet: WalletOption) => {
+      setPickerStatus({ name: "connecting", id: wallet.id });
+      setConnecting(true);
+      try {
+        const kit = await loadKit();
+        shimLegacyXBull();
+        kit.StellarWalletsKit.setWallet(wallet.id);
+        const { address: next } = await kit.StellarWalletsKit.fetchAddress();
+        window.localStorage.setItem(ADDRESS_KEY, next);
+        setAddress(next);
+        setPickerStatus({ name: "idle" });
+        finishPick(next);
+      } catch (error) {
+        const message =
+          (error as { message?: string })?.message || `${wallet.name} did not share an address. Unlock it and try again.`;
+        setPickerStatus({ name: "failed", id: wallet.id, message });
+      } finally {
+        setConnecting(false);
+      }
+    },
+    [finishPick],
+  );
 
   const disconnect = useCallback(async () => {
     window.localStorage.removeItem(ADDRESS_KEY);
@@ -154,7 +222,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     () => ({ address, restoring, connecting, connect, disconnect, signer, signerFor }),
     [address, restoring, connecting, connect, disconnect, signer, signerFor],
   );
-  return <Context.Provider value={value}>{children}</Context.Provider>;
+  return (
+    <Context.Provider value={value}>
+      {children}
+      <WalletPicker
+        open={pickerOpen}
+        wallets={wallets}
+        status={pickerStatus}
+        onPick={pick}
+        onClose={() => {
+          finishPick(null);
+          setConnecting(false);
+        }}
+      />
+    </Context.Provider>
+  );
 }
 
 export function useWallet(): WalletContext {
