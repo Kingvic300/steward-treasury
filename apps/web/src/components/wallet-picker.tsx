@@ -171,8 +171,7 @@ function WalletRow({
           <span className="text-sm font-medium">{wallet.name}</span>
           {connecting && (
             <span className="text-xs text-accent">
-              Approve the request in {wallet.name}. If its window stays blank, unlock {wallet.name} from the browser
-              toolbar, then try again.
+              Approve the request in the {wallet.name} window. Unlock {wallet.name} first if it asks.
             </span>
           )}
           {failed && <span className="text-xs text-danger">{failed}</span>}

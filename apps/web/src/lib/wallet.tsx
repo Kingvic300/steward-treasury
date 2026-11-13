@@ -1,23 +1,35 @@
 "use client";
 
 /**
- * Wallet connection through Stellar Wallets Kit (Freighter, xBull, Albedo,
- * Lobstr, Hana). The kit is loaded on demand so it never runs on the server.
+ * Wallet session for the app: Freighter, xBull, Albedo, LOBSTR and Hana, chosen
+ * in Steward's own picker. Each wallet has a connector (see wallet-connectors.ts).
+ * The chosen wallet's id is stored so signing after a reload uses the same wallet.
  *
  * When NEXT_PUBLIC_ENABLE_TEST_WALLET is "true" a local test wallet replaces
- * the kit: it signs with a secret key read from localStorage. Playwright uses
+ * the picker: it signs with a secret key read from localStorage. Playwright uses
  * it to drive real testnet transactions. It must never be enabled in production.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { WalletPicker, type PickerStatus, type WalletOption } from "@/components/wallet-picker";
 import { network, testWalletEnabled } from "./network";
 import type { Signer } from "./treasury";
+import {
+  CONNECT_TIMEOUT_MS,
+  SIGN_TIMEOUT_MS,
+  closeXBullBridge,
+  detectAvailability,
+  loadConnectors,
+  withTimeout,
+} from "./wallet-connectors";
 
 const ADDRESS_KEY = "steward:wallet-address";
+const WALLET_ID_KEY = "steward:wallet-id";
 export const TEST_SECRET_KEY = "steward:test-wallet-secret";
 
 interface WalletContext {
   address: string | null;
+  /** The connected wallet's id, for example "freighter" or "xbull". */
+  walletId: string | null;
   /** True until the stored session has been read on first load. */
   restoring: boolean;
   connecting: boolean;
@@ -30,85 +42,7 @@ interface WalletContext {
 
 const Context = createContext<WalletContext | null>(null);
 
-let kitReady: Promise<typeof import("@creit.tech/stellar-wallets-kit/sdk")> | null = null;
-
-interface KitModule {
-  productId: string;
-  productName: string;
-  productIcon: string;
-  productUrl: string;
-  isAvailable: () => Promise<boolean>;
-}
-let kitModules: KitModule[] = [];
-
-/** Freighter's extension is published as "Varial" in the kit; people know it as Freighter. */
-const DISPLAY_NAMES: Record<string, string> = { varial: "Freighter" };
-
-/**
- * The kit gives each wallet one second to answer "are you installed?". Firefox
- * extensions often take longer, so ask again with a longer allowance.
- */
-async function detectWallets(): Promise<{ id: string; name: string; icon: string; url: string; isAvailable: boolean }[]> {
-  return Promise.all(
-    kitModules.map(async (mod) => {
-      const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 4000));
-      const isAvailable = await Promise.race([mod.isAvailable().catch(() => false), timeout]);
-      return { id: mod.productId, name: DISPLAY_NAMES[mod.productId] ?? mod.productName, icon: mod.productIcon, url: mod.productUrl, isAvailable };
-    }),
-  );
-}
-
-interface LegacyXBullSdk {
-  getAddress?: unknown;
-  signTransaction?: unknown;
-  connect?: (permissions: { canRequestPublicKey: boolean; canRequestSign: boolean }) => Promise<unknown>;
-  getPublicKey?: () => Promise<string>;
-  signXDR?: (xdr: string, options?: { network?: string; publicKey?: string }) => Promise<string>;
-}
-
-/**
- * Older xBull extensions inject `window.xBullSDK` with connect/getPublicKey/signXDR,
- * while the kit's xBull bridge expects getAddress/signTransaction. Add the newer
- * methods on top of the older ones so both extension versions work.
- */
-function shimLegacyXBull() {
-  const sdk = (window as unknown as { xBullSDK?: LegacyXBullSdk }).xBullSDK;
-  if (!sdk || typeof sdk.getAddress === "function") return;
-  if (typeof sdk.getPublicKey !== "function" || typeof sdk.signXDR !== "function") return;
-  sdk.getAddress = async () => {
-    await sdk.connect?.({ canRequestPublicKey: true, canRequestSign: true });
-    return { address: await sdk.getPublicKey!() };
-  };
-  sdk.signTransaction = async ({ xdr, opts }: { xdr: string; opts?: { networkPassphrase?: string; address?: string } }) => ({
-    signedTxXdr: await sdk.signXDR!(xdr, { network: opts?.networkPassphrase, publicKey: opts?.address }),
-  });
-}
-
-function loadKit() {
-  kitReady ??= (async () => {
-    shimLegacyXBull();
-    const [sdk, types, freighter, xbull, albedo, lobstr, hana] = await Promise.all([
-      import("@creit.tech/stellar-wallets-kit/sdk"),
-      import("@creit.tech/stellar-wallets-kit/types"),
-      import("@creit.tech/stellar-wallets-kit/modules/freighter"),
-      import("@creit.tech/stellar-wallets-kit/modules/xbull"),
-      import("@creit.tech/stellar-wallets-kit/modules/albedo"),
-      import("@creit.tech/stellar-wallets-kit/modules/lobstr"),
-      import("@creit.tech/stellar-wallets-kit/modules/hana"),
-    ]);
-    const modules = [
-      new freighter.FreighterModule(),
-      new xbull.xBullModule(),
-      new albedo.AlbedoModule(),
-      new lobstr.LobstrModule(),
-      new hana.HanaModule(),
-    ];
-    kitModules = modules as unknown as KitModule[];
-    sdk.StellarWalletsKit.init({ network: types.Networks.TESTNET, modules });
-    return sdk;
-  })();
-  return kitReady;
-}
+const usingTestWallet = () => testWalletEnabled && !!window.localStorage.getItem(TEST_SECRET_KEY);
 
 async function testWallet() {
   const { Keypair, TransactionBuilder } = await import("@stellar/stellar-sdk");
@@ -125,27 +59,53 @@ async function testWallet() {
   };
 }
 
+function readStored(key: string) {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key: string, value: string | null) {
+  try {
+    if (value === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, value);
+  } catch {
+    // Storage blocked: the session lasts until reload.
+  }
+}
+
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
+  const [walletId, setWalletId] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [wallets, setWallets] = useState<WalletOption[]>([]);
   const [pickerStatus, setPickerStatus] = useState<PickerStatus>({ name: "loading" });
   const resolvePick = useRef<((address: string | null) => void) | null>(null);
-  /** Bumped when the picker closes, so a wallet that answers late is ignored. */
+  /** Bumped when the picker closes or another wallet is chosen, so late answers are ignored. */
   const pickAttempt = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        if (testWalletEnabled && window.localStorage.getItem(TEST_SECRET_KEY)) {
+        if (usingTestWallet()) {
           const wallet = await testWallet();
-          if (!cancelled) setAddress(wallet.address);
+          if (!cancelled) {
+            setAddress(wallet.address);
+            setWalletId("test");
+          }
         } else {
-          const stored = window.localStorage.getItem(ADDRESS_KEY);
-          if (stored && !cancelled) setAddress(stored);
+          const stored = readStored(ADDRESS_KEY);
+          const storedId = readStored(WALLET_ID_KEY);
+          // Sessions from before wallet ids were stored cannot sign; drop them.
+          if (stored && storedId && !cancelled) {
+            setAddress(stored);
+            setWalletId(storedId);
+          }
         }
       } catch {
         // No session to restore.
@@ -163,12 +123,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     resolvePick.current?.(result);
     resolvePick.current = null;
     setPickerOpen(false);
+    setConnecting(false);
   }, []);
 
   const connect = useCallback(async () => {
-    if (testWalletEnabled && window.localStorage.getItem(TEST_SECRET_KEY)) {
+    if (usingTestWallet()) {
       const next = (await testWallet()).address;
       setAddress(next);
+      setWalletId("test");
       return next;
     }
     setPickerStatus({ name: "loading" });
@@ -178,17 +140,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       resolvePick.current = resolve;
     });
     try {
-      const kit = await loadKit();
-      await kit.StellarWalletsKit.refreshSupportedWallets();
-      setWallets(await detectWallets());
-      setPickerStatus({ name: "idle" });
+      setWallets(await detectAvailability(await loadConnectors()));
     } catch {
       setWallets([]);
-      setPickerStatus({ name: "idle" });
     }
-    const next = await picked;
-    setConnecting(false);
-    return next;
+    setPickerStatus((status) => (status.name === "loading" ? { name: "idle" } : status));
+    return picked;
   }, []);
 
   const pick = useCallback(
@@ -197,13 +154,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setPickerStatus({ name: "connecting", id: wallet.id });
       setConnecting(true);
       try {
-        const kit = await loadKit();
-        shimLegacyXBull();
-        kit.StellarWalletsKit.setWallet(wallet.id);
-        const { address: next } = await kit.StellarWalletsKit.fetchAddress();
-        if (attempt !== pickAttempt.current) return; // The person closed the picker meanwhile.
-        window.localStorage.setItem(ADDRESS_KEY, next);
+        const connector = (await loadConnectors()).find((c) => c.id === wallet.id);
+        if (!connector) throw new Error(`${wallet.name} is not supported.`);
+        const next = await withTimeout(connector.getAddress(), wallet.name, CONNECT_TIMEOUT_MS);
+        if (attempt !== pickAttempt.current) return;
+        writeStored(ADDRESS_KEY, next);
+        writeStored(WALLET_ID_KEY, wallet.id);
         setAddress(next);
+        setWalletId(wallet.id);
         setPickerStatus({ name: "idle" });
         finishPick(next);
       } catch (error) {
@@ -211,7 +169,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         const message =
           (error as { message?: string })?.message || `${wallet.name} did not share an address. Unlock it and try again.`;
         setPickerStatus({ name: "failed", id: wallet.id, message });
-      } finally {
         setConnecting(false);
       }
     },
@@ -219,29 +176,30 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   );
 
   const disconnect = useCallback(async () => {
-    window.localStorage.removeItem(ADDRESS_KEY);
+    writeStored(ADDRESS_KEY, null);
+    writeStored(WALLET_ID_KEY, null);
     setAddress(null);
-    if (kitReady) {
-      try {
-        await (await kitReady).StellarWalletsKit.disconnect();
-      } catch {
-        // Already disconnected.
-      }
-    }
+    setWalletId(null);
+    closeXBullBridge();
   }, []);
 
   const signerFor = useCallback(
     (forAddress: string): Signer => ({
       publicKey: forAddress,
       signTransaction: async (xdr, options) => {
-        if (testWalletEnabled && window.localStorage.getItem(TEST_SECRET_KEY)) {
-          return (await testWallet()).signTransaction(xdr);
-        }
-        const kit = await loadKit();
-        return kit.StellarWalletsKit.signTransaction(xdr, {
-          networkPassphrase: options?.networkPassphrase ?? network.passphrase,
-          address: forAddress,
-        });
+        if (usingTestWallet()) return (await testWallet()).signTransaction(xdr);
+        const id = readStored(WALLET_ID_KEY);
+        const connector = (await loadConnectors()).find((c) => c.id === id);
+        if (!connector) throw new Error("No wallet is connected. Connect a wallet and try again.");
+        const signedTxXdr = await withTimeout(
+          connector.signTransaction(xdr, {
+            networkPassphrase: options?.networkPassphrase ?? network.passphrase,
+            address: forAddress,
+          }),
+          connector.name,
+          SIGN_TIMEOUT_MS,
+        );
+        return { signedTxXdr, signerAddress: forAddress };
       },
     }),
     [],
@@ -250,22 +208,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const signer = useMemo(() => (address ? signerFor(address) : null), [address, signerFor]);
 
   const value = useMemo(
-    () => ({ address, restoring, connecting, connect, disconnect, signer, signerFor }),
-    [address, restoring, connecting, connect, disconnect, signer, signerFor],
+    () => ({ address, walletId, restoring, connecting, connect, disconnect, signer, signerFor }),
+    [address, walletId, restoring, connecting, connect, disconnect, signer, signerFor],
   );
+
   return (
     <Context.Provider value={value}>
       {children}
-      <WalletPicker
-        open={pickerOpen}
-        wallets={wallets}
-        status={pickerStatus}
-        onPick={pick}
-        onClose={() => {
-          finishPick(null);
-          setConnecting(false);
-        }}
-      />
+      <WalletPicker open={pickerOpen} wallets={wallets} status={pickerStatus} onPick={pick} onClose={() => finishPick(null)} />
     </Context.Provider>
   );
 }
