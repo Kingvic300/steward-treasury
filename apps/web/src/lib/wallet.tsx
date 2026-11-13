@@ -32,6 +32,32 @@ const Context = createContext<WalletContext | null>(null);
 
 let kitReady: Promise<typeof import("@creit.tech/stellar-wallets-kit/sdk")> | null = null;
 
+interface KitModule {
+  productId: string;
+  productName: string;
+  productIcon: string;
+  productUrl: string;
+  isAvailable: () => Promise<boolean>;
+}
+let kitModules: KitModule[] = [];
+
+/** Freighter's extension is published as "Varial" in the kit; people know it as Freighter. */
+const DISPLAY_NAMES: Record<string, string> = { varial: "Freighter" };
+
+/**
+ * The kit gives each wallet one second to answer "are you installed?". Firefox
+ * extensions often take longer, so ask again with a longer allowance.
+ */
+async function detectWallets(): Promise<{ id: string; name: string; icon: string; url: string; isAvailable: boolean }[]> {
+  return Promise.all(
+    kitModules.map(async (mod) => {
+      const timeout = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 4000));
+      const isAvailable = await Promise.race([mod.isAvailable().catch(() => false), timeout]);
+      return { id: mod.productId, name: DISPLAY_NAMES[mod.productId] ?? mod.productName, icon: mod.productIcon, url: mod.productUrl, isAvailable };
+    }),
+  );
+}
+
 interface LegacyXBullSdk {
   getAddress?: unknown;
   signTransaction?: unknown;
@@ -70,16 +96,15 @@ function loadKit() {
       import("@creit.tech/stellar-wallets-kit/modules/lobstr"),
       import("@creit.tech/stellar-wallets-kit/modules/hana"),
     ]);
-    sdk.StellarWalletsKit.init({
-      network: types.Networks.TESTNET,
-      modules: [
-        new freighter.FreighterModule(),
-        new xbull.xBullModule(),
-        new albedo.AlbedoModule(),
-        new lobstr.LobstrModule(),
-        new hana.HanaModule(),
-      ],
-    });
+    const modules = [
+      new freighter.FreighterModule(),
+      new xbull.xBullModule(),
+      new albedo.AlbedoModule(),
+      new lobstr.LobstrModule(),
+      new hana.HanaModule(),
+    ];
+    kitModules = modules as unknown as KitModule[];
+    sdk.StellarWalletsKit.init({ network: types.Networks.TESTNET, modules });
     return sdk;
   })();
   return kitReady;
@@ -108,6 +133,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [wallets, setWallets] = useState<WalletOption[]>([]);
   const [pickerStatus, setPickerStatus] = useState<PickerStatus>({ name: "loading" });
   const resolvePick = useRef<((address: string | null) => void) | null>(null);
+  /** Bumped when the picker closes, so a wallet that answers late is ignored. */
+  const pickAttempt = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +159,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const finishPick = useCallback((result: string | null) => {
+    pickAttempt.current++;
     resolvePick.current?.(result);
     resolvePick.current = null;
     setPickerOpen(false);
@@ -151,8 +179,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     });
     try {
       const kit = await loadKit();
-      const found = await kit.StellarWalletsKit.refreshSupportedWallets();
-      setWallets(found.map(({ id, name, icon, url, isAvailable }) => ({ id, name, icon, url, isAvailable })));
+      await kit.StellarWalletsKit.refreshSupportedWallets();
+      setWallets(await detectWallets());
       setPickerStatus({ name: "idle" });
     } catch {
       setWallets([]);
@@ -165,6 +193,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const pick = useCallback(
     async (wallet: WalletOption) => {
+      const attempt = ++pickAttempt.current;
       setPickerStatus({ name: "connecting", id: wallet.id });
       setConnecting(true);
       try {
@@ -172,11 +201,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         shimLegacyXBull();
         kit.StellarWalletsKit.setWallet(wallet.id);
         const { address: next } = await kit.StellarWalletsKit.fetchAddress();
+        if (attempt !== pickAttempt.current) return; // The person closed the picker meanwhile.
         window.localStorage.setItem(ADDRESS_KEY, next);
         setAddress(next);
         setPickerStatus({ name: "idle" });
         finishPick(next);
       } catch (error) {
+        if (attempt !== pickAttempt.current) return;
         const message =
           (error as { message?: string })?.message || `${wallet.name} did not share an address. Unlock it and try again.`;
         setPickerStatus({ name: "failed", id: wallet.id, message });

@@ -40,7 +40,7 @@ export function WalletPicker({
   const busy = status.name === "connecting";
 
   return (
-    <Primitive.Root open={open} onOpenChange={(next) => !next && !busy && onClose()}>
+    <Primitive.Root open={open} onOpenChange={(next) => !next && onClose()}>
       <Primitive.Portal>
         <Primitive.Overlay className="fixed inset-0 z-40 bg-foreground/30 backdrop-blur-[2px]" />
         <Primitive.Content
@@ -56,7 +56,6 @@ export function WalletPicker({
             </div>
             <Primitive.Close
               aria-label="Close"
-              disabled={busy}
               className="-mr-2 -mt-1 rounded-md p-1.5 text-muted hover:bg-raised hover:text-foreground disabled:opacity-40"
             >
               <X className="size-4" />
@@ -80,13 +79,13 @@ export function WalletPicker({
                   empty={installed.length === 0 ? "Install one of the wallets below, then reopen this window." : undefined}
                 >
                   {installed.map((wallet) => (
-                    <WalletRow key={wallet.id} wallet={wallet} status={status} onPick={onPick} disabled={busy} />
+                    <WalletRow key={wallet.id} wallet={wallet} status={status} onPick={onPick} disabled={busy && status.id === wallet.id} />
                   ))}
                 </WalletGroup>
                 {others.length > 0 && (
                   <WalletGroup label="Other wallets">
                     {others.map((wallet) => (
-                      <WalletRow key={wallet.id} wallet={wallet} status={status} onPick={onPick} disabled={busy} />
+                      <WalletRow key={wallet.id} wallet={wallet} status={status} onPick={onPick} disabled={busy && status.id === wallet.id} />
                     ))}
                   </WalletGroup>
                 )}
@@ -170,7 +169,12 @@ function WalletRow({
         {icon}
         <span className="grid flex-1 gap-0.5">
           <span className="text-sm font-medium">{wallet.name}</span>
-          {connecting && <span className="text-xs text-accent">Approve the request in {wallet.name}…</span>}
+          {connecting && (
+            <span className="text-xs text-accent">
+              Approve the request in {wallet.name}. If its window stays blank, unlock {wallet.name} from the browser
+              toolbar, then try again.
+            </span>
+          )}
           {failed && <span className="text-xs text-danger">{failed}</span>}
         </span>
         {connecting ? (
